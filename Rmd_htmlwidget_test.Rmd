@@ -1,0 +1,158 @@
+---
+title: "demo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## taxa graphs
+
+
+```{r, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+library(plotly)
+library(Hmisc)
+library(pls)
+library(plyr)
+library(reshape2)
+library(boot)
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(xlsx)
+library(RColorBrewer)
+library(doBy)
+library(scales)
+library(splitstackshape)
+
+var2<- "Abx"
+var3<- "Drug"
+var4<- "Time"
+var2.levels <- c("H2O","Abx")
+var3.levels<-c("Saline","Cocaine", "Morphine")
+var4.levels<-c("7d","28d")
+
+n <- 60
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+
+
+mappingfile <- read.xlsx("F:/Trina/MMPC2/MMPC Core E/Orders/D4006-Gut microbiota/NEPHELE/MiSeq_qiime_mothur_template.xlsx", 1)
+
+
+path <- "F:/Trina/MMPC2/MMPC Core E/Orders/D4006-Gut microbiota/NEPHELE/core_diversity/taxa_plots/"
+
+Phy<- list.files(path=path,pattern="*_L2.txt")
+GM_P<- read.delim(paste(path, Phy, sep=""), skip=1, header=TRUE) #change to specific folder)
+
+Clss<- list.files(path=path,pattern="*_L3.txt")
+GM_Clss<- read.delim(paste(path, Clss, sep=""),skip=1, header=TRUE)
+
+Ordr<- list.files(path=path,pattern="*_L4.txt")
+GM_Ordr<- read.delim(paste(path,Ordr, sep=""),skip=1, header=TRUE)
+
+Fmly<- list.files(path=path,pattern="*_L5.txt")
+GM_Fmly<- read.delim(paste(path,Fmly, sep=""),skip=1, header=TRUE)
+
+Genus<- list.files(path=path,pattern="*_L6.txt")
+Bugs<- read.delim(paste(path,Genus, sep=""),skip=1, header=TRUE)
+
+mappingfile[2:10] <- NULL
+Bugs.t<- t(Bugs)
+colnames(Bugs.t)<-Bugs.t[1,1:ncol(Bugs.t)]
+Bugs.t<- Bugs.t[-1, ]
+Bugs.t <-cbind(X.SampleID = rownames(Bugs.t), Bugs.t)
+rownames(Bugs.t)<- NULL
+
+Bugs <- merge(mappingfile, Bugs.t, by="X.SampleID")
+names(Bugs)[names(Bugs)=="Description"] <- "Group"
+
+Bugs_groups<-unique(Bugs$Group)
+
+All<-Bugs
+
+GM_Phylum.t<- t(GM_P)
+colnames(GM_Phylum.t)<-GM_Phylum.t[1,1:ncol(GM_Phylum.t)]
+GM_Phylum.t<- GM_Phylum.t[-1, ]
+GM_Phylum.t <-cbind(X.SampleID = rownames(GM_Phylum.t), GM_Phylum.t)
+rownames(GM_Phylum.t)<- NULL
+
+
+GM_Phylum2 <- merge(mappingfile, GM_Phylum.t, by="X.SampleID")
+names(GM_Phylum2)[names(GM_Phylum2)=="Description"] <- "Group"
+
+
+GM_Phylum<- GM_Phylum2[ ,3:ncol(GM_Phylum2)]
+GM_Phylum<- format(GM_Phylum2, scientific=FALSE)
+
+
+i <- sapply(GM_Phylum, is.factor)
+GM_Phylum[i] <- lapply(GM_Phylum[i], as.character)
+j<- sapply(GM_Phylum,is.character)
+GM_Phylum[j]<- lapply(GM_Phylum[j], as.numeric)
+#GM_Phylum<-GM_Phylum[, colSums(GM_Phylum) != 0]
+
+GM_Phylum<- cbind(All[,1:2], GM_Phylum[,3:ncol(GM_Phylum)])
+Phylum_for_ANOVA<-GM_Phylum[,2:ncol(GM_Phylum)]
+Phylum_for_ANOVA2<-cbind(Phylum_for_ANOVA[,1], (Phylum_for_ANOVA[,2:ncol(Phylum_for_ANOVA)])*100)
+names(Phylum_for_ANOVA2)[1]<- "Group"
+write.xlsx(Phylum_for_ANOVA2, (paste(path, "Phyla table for ANOVA.xlsx", sep="")), row.names = FALSE)
+
+
+
+GM_Phylum_melt <- melt(GM_Phylum[-c(1)], id.vars= "Group")
+GM_Phylum_melt_sum<- ddply(GM_Phylum_melt, c("variable", "Group"), summarise, mean = mean(value), sd = sd(value), sem = sd(value)/sqrt(length(value)), mean_perc = mean(value)*100, sd_perc = sd(value)*100, sem_perc = sd(value)/sqrt(length(value))*100)
+GM_Phylum_melt_sum<- format(GM_Phylum_melt_sum, scientific=FALSE)
+GM_Phylum_melt_sum_perc<- cbind.data.frame(GM_Phylum_melt_sum[, 1:2], GM_Phylum_melt_sum[ ,6:8])
+
+
+GM_Phylum_melt_sum_perc$variable<- factor(GM_Phylum_melt_sum_perc$variable)
+GM_Phylum_melt_sum_perc$Group <- factor(GM_Phylum_melt_sum_perc$Group)
+j<- sapply(GM_Phylum_melt_sum_perc, is.character)
+GM_Phylum_melt_sum_perc[j]<- lapply(GM_Phylum_melt_sum_perc[j], as.numeric)
+
+
+GM_Phylum_melt_sum_perc_filter<- subset(GM_Phylum_melt_sum_perc, mean_perc >= 0.1)
+GM_Phylum_melt_filtermeans_perc <- dcast(GM_Phylum_melt_sum_perc_filter, variable~Group, value.var= "mean_perc")
+Phylum_Abundance_sum_perc<- colSums(data.matrix(GM_Phylum_melt_filtermeans_perc[ ,2:ncol(GM_Phylum_melt_filtermeans_perc)]), na.rm=TRUE)
+
+GM_Phylum_melt_sum_perc_filter_melt<- melt(GM_Phylum_melt_sum_perc_filter[ ,1:3], id.vars = c("Group","variable"), measure.vars = "mean_perc")
+colnames(GM_Phylum_melt_sum_perc_filter_melt)<- c("Group", "Bug", "mean_perc", "value")
+GM_Phylum_melt_sum_perc_filter_melt<- cSplit(as.data.frame(GM_Phylum_melt_sum_perc_filter_melt), "Group", sep = "_")
+GM_Phylum_melt_sum_perc_filter_melt2<- GM_Phylum_melt_sum_perc_filter_melt[order(GM_Phylum_melt_sum_perc_filter_melt$value), ]
+
+
+names(GM_Phylum_melt_sum_perc_filter_melt2)<- c("Taxa", "variable", "mean_perc", var2, var3, var4)
+
+GM_Phylum_melt_sum_perc_filter_melt2[[var2]] <- factor (GM_Phylum_melt_sum_perc_filter_melt2[[var2]],levels = var2.levels)
+GM_Phylum_melt_sum_perc_filter_melt2[[var3]] <- factor (GM_Phylum_melt_sum_perc_filter_melt2[[var3]],levels = var3.levels)
+GM_Phylum_melt_sum_perc_filter_melt2[[var4]] <- factor (GM_Phylum_melt_sum_perc_filter_melt2[[var4]],levels = var4.levels)
+GM_Phylum_melt_sum_perc_filter_melt2$Taxa <- gsub(".*;p__","", GM_Phylum_melt_sum_perc_filter_melt2$Taxa)
+GM_Phylum_melt_sum_perc_filter_melt2$Taxa<- factor(GM_Phylum_melt_sum_perc_filter_melt2$Taxa, levels = unique(GM_Phylum_melt_sum_perc_filter_melt2$Taxa))
+
+phystack<- ggplot(data=GM_Phylum_melt_sum_perc_filter_melt2, aes(x=variable, y=mean_perc, fill=Taxa)) +
+  geom_bar(stat= "identity", position = "stack") +
+  #scale_colour_gradientn(colours=rainbow(5))
+  scale_fill_manual(values=col_vector) +
+  guides(fill=guide_legend(nrow=2,byrow=TRUE)) +
+  theme_bw() +
+  theme(legend.key = element_rect(size = 3), legend.position="bottom", legend.title=element_blank(), legend.text=element_text(size=6), axis.text.x = element_blank(), axis.title.x=element_blank(), axis.ticks.x=element_blank()) + 
+  ylab("% Abundance") +
+  scale_y_continuous(expand=c(0,0))+
+  #########################change variables for faceting##############################
+  facet_grid(as.formula(paste(".~", var4, "+", var2, "+", var3, sep="")))  #change variables faceted here
+
+
+
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, plotly=TRUE}
+
+
+ggplotly(phystack,  width = 7, height = 7, session="knitr")
+
+```
+
